@@ -1,13 +1,43 @@
 #include <iostream>
-#include "glad/glad.h"
+#include <thread>
+
+#include "HAPAvFormatForgeRenderer.h"
 #include "HAPAvFormatOpenGLRenderer.h"
-#if !defined( Linux )
-    #include "SDL.h"
-#else
-    #include <SDL2/SDL.h>
+
+#ifdef __APPLE__
+#import <Cocoa/cocoa.h>
+#import <Metal/Metal.h>
+#import <MetalKit/MetalKit.h>
 #endif
 
+
 using namespace std;
+using namespace std::chrono;
+
+double currentMS()
+{
+    duration<double, milli> time_span = duration_cast<duration<double, milli>>(system_clock::now().time_since_epoch());
+    return time_span.count();
+}
+
+#ifdef __APPLE__
+
+static inline void handlePlatformEvents()
+{
+    NSEvent* event;
+    do {
+        event = [NSApp nextEventMatchingMask: NSEventMaskAny
+                                   untilDate: nil
+                                      inMode: NSDefaultRunLoopMode
+                                     dequeue: YES];
+        switch ([event type]) {
+            default:
+                [NSApp sendEvent: event];
+        }
+    } while (event != nil);
+}
+
+#endif
 
 int main(int argc, char** argv)
 {
@@ -36,10 +66,12 @@ int main(int argc, char** argv)
     }
     int videoindex=-1;
     for(unsigned int i=0; i<pFormatCtx->nb_streams; i++)
+    {
         if(pFormatCtx->streams[i]->codecpar->codec_type==AVMEDIA_TYPE_VIDEO){
             videoindex=i;
             break;
         }
+    }
     if(videoindex==-1){
         fprintf(stderr, "Didn't find a video stream.\n");
         return -1;
@@ -55,35 +87,45 @@ int main(int argc, char** argv)
     fprintf(stderr, "--------------- File Information ----------------\n");
     av_dump_format(pFormatCtx,0,filepath,0);
 
-    // Initialize SDL And create window
-    if(SDL_Init(SDL_INIT_VIDEO)) {
-        fprintf(stderr, "Could not initialize SDL - %s\n", SDL_GetError());
+    HAPAvFormatForgeRenderer hapAvFormatRenderer;
+
+    // Initialize The forge renderer
+    std::cout << "step 1" << std::endl;
+    if (hapAvFormatRenderer.initRenderer())
+    {
+        fprintf(stderr, "Could not initialize The forge - %s\n", hapAvFormatRenderer.get_error());
         return -1;
     }
 
-    //SDL 2.0 Support for multiple windows
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
-    SDL_Window *window = SDL_CreateWindow("Simplest ffmpeg player's Window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        pCodecParams->width, pCodecParams->height,
-        SDL_WINDOW_OPENGL);
-    if(!window) {
-        fprintf(stderr, "SDL: could not create window - exiting:%s\n",SDL_GetError());
+    // Open window as needed
+    std::cout << "step 2" << std::endl;
+    if (hapAvFormatRenderer.openWindow("Simple ffmpeg player",
+                                       pCodecParams->width, pCodecParams->height))
+    {
+        fprintf(stderr, "Could not open window - %s\n", hapAvFormatRenderer.get_error());
         return -1;
     }
-    SDL_GL_CreateContext(window);
 
-    // Load OpenGL API via glad - useless on macOS - seems needed on windows
-    gladLoadGLLoader(SDL_GL_GetProcAddress);
+    // Load rendering resources
+    std::cout << "step 4" << std::endl;
+    hapAvFormatRenderer.readCodecParams(pCodecParams);
 
-    // Instanciate HAPAvFormatOpenGLRenderer
-    HAPAvFormatOpenGLRenderer hapAvFormatRenderer(pCodecParams);
+    std::cout << "step 3" << std::endl;
+    if (hapAvFormatRenderer.createContext())
+    {
+        fprintf(stderr, "Could not create context - %s\n", hapAvFormatRenderer.get_error());
+        return -1;
+    }
+
 
     // Loop playing back frames until user ask to close the window
     AVPacket packet;
     bool shouldQuit = false;
-    double lastFrameTimeMs = SDL_GetTicks();
+    double lastFrameTimeMs = currentMS();
     while (!shouldQuit) {
+#ifdef __APPLE__
+        handlePlatformEvents();
+#endif
         while (!shouldQuit && av_read_frame(pFormatCtx, &packet)>=0){
             if(packet.stream_index==videoindex){
                 int64_t den = pFormatCtx->streams[packet.stream_index]->time_base.den;
@@ -97,24 +139,14 @@ int main(int argc, char** argv)
                 double frameDurationMs = frameDuration / 1000.0;
                 double frameEndTimeMs = lastFrameTimeMs + frameDurationMs;
 
-                // Delay: remark we keep processing UI events, this is dirty
-                // but this example aims at keeping the code as easy to read
-                // as possible, so keep it simple
-                SDL_Event event;
-                while(!shouldQuit && SDL_PollEvent(&event)) {
-                    if (event.type == SDL_QUIT) {
-                        shouldQuit = true;
-                    }
-                }
-
                 // Sleep until we reach frame end time
-                while (SDL_GetTicks() < frameEndTimeMs) {
-                    SDL_Delay(1);
+                while (currentMS() < frameEndTimeMs) {
+                    std::this_thread::sleep_for(std::chrono::nanoseconds(300));
                 }
                 lastFrameTimeMs = frameEndTimeMs;
 
                 // Now swap OpenGL Backbuffer to front
-                SDL_GL_SwapWindow(window);
+//                SDL_GL_SwapWindow(window);
             }
             av_packet_unref(&packet);
         }
@@ -124,7 +156,7 @@ int main(int argc, char** argv)
     }
 
     // Free resources - remark: should free OpenGL resources allocated in HAPAvFormatOpenGLRenderer
-    SDL_Quit();
+//    SDL_Quit();
     avformat_close_input(&pFormatCtx);
 
     return 0;
