@@ -1,23 +1,24 @@
-# FFmpegHapGlPlayer
+# FFmpegHapForgePlayer (WIP)
 
-Very simple cross-platform code to playback a HAP video file using FFMPEG for demuxing and HapDecode/OpenGL for decoding.
+Very simple cross-platform (only tested on mac and windows) code to playback a HAP video file using FFMPEG for demuxing and HapDecode for decoding and The-Forge for rendering.
 It handles Hap, Hap Alpha, HapQ & HapQ+Alpha.
 
 The idea in this project is to demonstrate how to:
 - demux a HAP video file using FFmpeg / libavformat
 - decompress the snappy compression using HapDecode
-- send the compressed DXT buffer to an OpenGL texture (or two if HapQ+Alpha but this format is not yet supported in FFMPEG...)
-- render the texture using OpenGL (with a specific shader in case of HapQ)
+- send the compressed DXT buffer to a The-Forge texture (or two if HapQ+Alpha but this format is not yet supported in FFMPEG...)
+- render the texture using The-Forge (with a specific shader in case of HapQ)
 
-It uses SDL2 to create an OpenGL window.
+It uses The-Forge for rendering and Native code for opening windows (as this is not a supported feature of The-Forge (At least not when using it purely as a library)).
 
-I've been searching for how to do this process and couldn't find a simple sample, so here it is.
-As it's only to demonstrate the process, it ignores any audio track, and I took some shortcuts (freeing resources properly, SDL_Delay call etc.), so the code is small enough to focus on demux->HapDecode->texture(s)->shader->display.
 Any suggestion is welcome.
 
 # Linux 
 
 # FIXME
+Currently only supports macos
+Refactor main run loop for a smoother experience
+
 Only clang can compile the binary. Install clang is mandatory (apt-cache search clang to choose the one you need)
 + don't forget to install libsnappy, libblocksruntime  and libdispatch
 
