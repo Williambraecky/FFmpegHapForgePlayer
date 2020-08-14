@@ -1,8 +1,6 @@
 #ifndef SHADERCOMPILER_H
 #define SHADERCOMPILER_H
 
-#include <QMap>
-
 #include <string>
 #include <vector>
 
