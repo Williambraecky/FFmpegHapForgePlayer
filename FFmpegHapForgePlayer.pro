@@ -1,23 +1,28 @@
 # Setup
 TEMPLATE = app
-CONFIG += console c++11
+CONFIG += c++14
 CONFIG -= app_bundle
 CONFIG -= qt
 
 # Turn this off to skip runtime info log
 DEFINES += LOG_RUNTIME_INFO
 
+include(ShaderCompiler.pri)
+
+THE_FORGE_ROOT = $$PWD/The-Forge
+include($$THE_FORGE_ROOT/The-Cute-Forge.pri)
+
 # Sources
 HEADERS += \
-    src/HAPAvFormatOpenGLRenderer.h \
+    src/HAPAvFormatForgeRenderer.h \
     src/hap/hap.h \
-    src/glad/glad.h
+    src/shadercompilerhelper.h
 
 SOURCES += \
-    src/HAPAvFormatOpenGLRenderer.cpp \
+    src/HAPAvFormatForgeRenderer.cpp \
     src/main.cpp \
     src/hap/hap.c \
-    src/glad/glad.c
+    src/shadercompilerhelper.cpp
 
 EXECUTABLE_PATH = $${OUT_PWD}/$${TARGET}
 
@@ -28,8 +33,6 @@ mac {
 
     SNAPPY_PATH =  $$_PRO_FILE_PWD_/dependencies/Mac/x86_64/snappy
     INCLUDEPATH += $${SNAPPY_PATH}/include
-
-    SDL_PATH =     $$_PRO_FILE_PWD_/dependencies/Mac/x86_64/SDL2
 
     # FFMPEG
     FFMPEGLIBPATH = $${FFMPEGPATH}/lib
@@ -51,20 +54,22 @@ mac {
     LIBS += /usr/lib/libiconv.dylib
     LIBS += /usr/lib/liblzma.dylib
 
-    # SDL
-    SDL_LIB_PATH = $${SDL_PATH}/lib/
-    INCLUDEPATH += $${SDL_LIB_PATH}/SDL2.framework/Headers
-    QMAKE_LFLAGS += -F$${SDL_LIB_PATH}
-    LIBS += -framework SDL2
-    QMAKE_POST_LINK += install_name_tool -change @rpath/SDL2.framework/Versions/A/SDL2 $${SDL_LIB_PATH}/SDL2.framework/Versions/A/SDL2 $${EXECUTABLE_PATH};
-
     # Snappy
     SNAPPY_LIB_PATH = $${SNAPPY_PATH}/lib
     LIBS += $${SNAPPY_LIB_PATH}/libsnappy.dylib
     QMAKE_POST_LINK += install_name_tool -change @rpath/libsnappy.dylib $${SNAPPY_LIB_PATH}/libsnappy.dylib $${EXECUTABLE_PATH};
 
-    # OpenGL
-    LIBS += -framework OpenGL
+    # The Forge
+    QMAKE_CXXFLAGS += -ObjC++ -fobjc-arc
+    LIBS += -framework QuartzCore
+    LIBS += -framework Metal
+    LIBS += -framework MetalKit
+    LIBS += -framework MetalPerformanceShaders
+    LIBS += -framework IOKit
+    LIBS += -framework Cocoa
+    LIBS += -framework AppKit
+
+    DEFINES += METAL
 }
 
 windows {
@@ -75,18 +80,11 @@ windows {
     SNAPPY_PATH =  $$_PRO_FILE_PWD_/dependencies/Windows/x86_64/snappy
     INCLUDEPATH += $${SNAPPY_PATH}/include
 
-    SDL_PATH =     $$_PRO_FILE_PWD_/dependencies/Windows/x86_64/SDL2
-
     # FFMPEG
     FFMPEGLIBPATH = $${FFMPEGPATH}/lib
     LIBS += $${FFMPEGLIBPATH}/avcodec-lav.lib
     LIBS += $${FFMPEGLIBPATH}/avformat-lav.lib
     LIBS += $${FFMPEGLIBPATH}/avutil-lav.lib
-
-    # SDL
-    INCLUDEPATH += $${SDL_PATH}/include
-    SDL_LIB_PATH = $${SDL_PATH}/lib
-    LIBS += $${SDL_LIB_PATH}/SDL2.lib $${SDL_LIB_PATH}/SDL2main.lib
 
     # Snappy
     SNAPPY_LIB_PATH = $${SNAPPY_PATH}/lib
@@ -96,8 +94,40 @@ windows {
         LIBS += $${SNAPPY_LIB_PATH}/snappyd.lib
     }
 
-    # OpenGL
-    LIBS += -lopengl32
+    # The Forge
+    defineTest(copyToDestDir) {
+        files = $$1
+        dir = $$2
+        # replace slashes in destination path for Windows
+        win32:dir ~= s,/,\\,g
+
+        !exists($$dir){
+            win32:QMAKE_POST_LINK += if not exist $$shell_quote($$dir) $$QMAKE_MKDIR $$shell_quote($$dir) $$escape_expand(\\n\\t)
+            !win32:QMAKE_POST_LINK += $$QMAKE_MKDIR -p $$shell_quote($$dir) $$escape_expand(\\n\\t)
+        }
+
+        for(file, files) {
+            # replace slashes in source path for Windows
+            win32:file ~= s,/,\\,g
+
+            QMAKE_POST_LINK += $$QMAKE_COPY_DIR $$shell_quote($$file) $$shell_quote($$dir) $$escape_expand(\\n\\t)
+        }
+
+        export(QMAKE_POST_LINK)
+    }
+
+
+    LIBS += -L$$THE_FORGE_ROOT/Common_3/ThirdParty/OpenSource/winpixeventruntime/bin -lWinPixEventRuntime
+    LIBS += -L$$THE_FORGE_ROOT/Common_3/ThirdParty/OpenSource/ags/ags_lib/lib/ -lamd_ags_x64
+    LIBS += -L$$THE_FORGE_ROOT/Common_3/ThirdParty/OpenSource/nvapi/amd64 -lnvapi64
+    LIBS += -L$$THE_FORGE_ROOT/Common_3/ThirdParty/OpenSource/DirectXShaderCompiler/lib/x64 -ldxcompiler
+    LIBS += -lXinput -lgdi32 -lComdlg32 -lOle32 -lUser32
+
+    copyToDestDir($$PWD/The-Forge/Common_3/ThirdParty/OpenSource/winpixeventruntime/bin/WinPixEventRuntime.dll \
+                  $$PWD/The-Forge/Common_3/ThirdParty/OpenSource/ags/ags_lib/lib/amd_ags_x64.dll \
+                  $$PWD/The-Forge/Common_3/ThirdParty/OpenSource/DirectXShaderCompiler/bin/x64/dxcompiler.dll \
+                  $$PWD/The-Forge/Common_3/ThirdParty/OpenSource/DirectXShaderCompiler/bin/x64/dxil.dll, $$OUT_PWD)
+
 }
 
 linux {
