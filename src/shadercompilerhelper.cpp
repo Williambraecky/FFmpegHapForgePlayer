@@ -31,6 +31,8 @@ bool ShaderCompilerHelper::transpileShader(const std::string& resourceFile,
     compileResult = compiler(compilerInput);
     if (!compileResult.success)
     {
+        std::cout << "Compile Logs: " << compileResult.logs << std::endl;
+        std::cout << "Compile Errors: " << compileResult.errors << std::endl;
         return false;
     }
     fp = std::fopen(targetFile.c_str(), "wb");
@@ -41,15 +43,6 @@ bool ShaderCompilerHelper::transpileShader(const std::string& resourceFile,
     std::fwrite(&(compileResult.outputCode[0]), 1, compileResult.outputCode.size(), fp);
     std::fclose(fp);
     return true;
-}
-
-static inline char getSeparator()
-{
-#if defined(_WIN32) || defined(_WINDOWS) ||  defined(XBOX)
-    return '\\';
-#else
-    return '/';
-#endif
 }
 
 bool ShaderCompilerHelper::transpileShaders(const TranspileDesc* descriptions, const uint32_t count, const uint32_t rendererApi)
@@ -74,7 +67,7 @@ bool ShaderCompilerHelper::transpileShaders(const TranspileDesc* descriptions, c
     }
     for (uint32_t i = 0; i < count; i++)
     {
-        const char *fileName = strrchr(descriptions[i].m_name.c_str(), getSeparator());
+        const char *fileName = strrchr(descriptions[i].m_name.c_str(), '/');
         if (!fileName)
         {
             fileName = descriptions[i].m_name.c_str();

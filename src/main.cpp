@@ -2,7 +2,6 @@
 #include <thread>
 
 #include "HAPAvFormatForgeRenderer.h"
-#include "HAPAvFormatOpenGLRenderer.h"
 
 #ifdef __APPLE__
 #import <Cocoa/cocoa.h>
@@ -14,7 +13,7 @@
 using namespace std;
 using namespace std::chrono;
 
-double currentMS()
+static double currentMS()
 {
     duration<double, milli> time_span = duration_cast<duration<double, milli>>(system_clock::now().time_since_epoch());
     return time_span.count();
@@ -22,22 +21,49 @@ double currentMS()
 
 #ifdef __APPLE__
 
-static inline void handlePlatformEvents()
+static inline bool handlePlatformEvents()
 {
     NSEvent* event;
+    bool quit = false;
     do {
         event = [NSApp nextEventMatchingMask: NSEventMaskAny
                                    untilDate: nil
                                       inMode: NSDefaultRunLoopMode
                                      dequeue: YES];
+        //TODO: handle quit events
         switch ([event type]) {
             default:
                 [NSApp sendEvent: event];
         }
     } while (event != nil);
+    return quit;
 }
+#elif WIN32
 
+#include <windows.h>
+
+static inline bool handlePlatformEvents()
+{
+    MSG msg;
+    msg.message = NULL;
+    bool quit = false;
+    while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+    {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+
+        if (WM_CLOSE == msg.message || WM_QUIT == msg.message)
+            quit = true;
+    }
+    return quit;
+}
+#else
+static inline bool handlePlatformEvents()
+{
+    return false;
+}
 #endif
+
 
 int main(int argc, char** argv)
 {
@@ -123,9 +149,6 @@ int main(int argc, char** argv)
     bool shouldQuit = false;
     double lastFrameTimeMs = currentMS();
     while (!shouldQuit) {
-#ifdef __APPLE__
-        handlePlatformEvents();
-#endif
         while (!shouldQuit && av_read_frame(pFormatCtx, &packet)>=0){
             if(packet.stream_index==videoindex){
                 int64_t den = pFormatCtx->streams[packet.stream_index]->time_base.den;
@@ -133,13 +156,17 @@ int main(int argc, char** argv)
                 int64_t frameDuration = av_rescale(packet.duration, AV_TIME_BASE * num, den);
 
                 // Display new frame in openGL backbuffer
+                double preRender = currentMS();
                 hapAvFormatRenderer.renderFrame(&packet,lastFrameTimeMs);
+                double postRender = currentMS();
+                std::cout << "render took " << postRender - preRender << "ms\n";
 
                 // Keep showing previous frame depending on movie FPS (see frameDurationMs below)
                 double frameDurationMs = frameDuration / 1000.0;
                 double frameEndTimeMs = lastFrameTimeMs + frameDurationMs;
 
                 // Sleep until we reach frame end time
+                shouldQuit = handlePlatformEvents();
                 while (currentMS() < frameEndTimeMs) {
                     std::this_thread::sleep_for(std::chrono::nanoseconds(300));
                 }

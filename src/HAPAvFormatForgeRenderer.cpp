@@ -16,6 +16,22 @@
 #import <MetalKit/MetalKit.h>
 #endif
 
+#ifdef WIN32
+#include <windowsx.h>
+#endif
+
+#include <chrono>
+
+using namespace std;
+using namespace std::chrono;
+
+static double currentMS()
+{
+    duration<double, milli> time_span = duration_cast<duration<double, milli>>(system_clock::now().time_since_epoch());
+    return time_span.count();
+}
+
+
 #if defined(__APPLE__) || defined( Linux )
     #include <dispatch/dispatch.h>
 #else
@@ -38,8 +54,14 @@ void HapMTDecode(HapDecodeWorkFunction function, void *info, unsigned int count,
 float2 g_retinaScale = { 1.0f, 1.0f };
 #endif
 
+#ifdef WIN32
+static WNDCLASSW	                             gWindowClass;
+
+
+#endif
+
 // Number of buffers to swap from
-#define IMAGE_COUNT 3
+#define IMAGE_COUNT MAX_SWAPCHAIN_IMAGES
 
 const char* g_error_messages[] =
 {
@@ -48,6 +70,8 @@ const char* g_error_messages[] =
     "Memalloc init error",
     "Swapchain initialize error",
     "Depthbuffer initialize error",
+    "Could not initialize window class",
+    "Could not open window",
 
     //Add error messages here
 };
@@ -143,10 +167,37 @@ int HAPAvFormatForgeRenderer::initRenderer()
     fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_LOG, "logs");
     fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_GPU_CONFIG, "resources");
     std::cout << "Current RD_SHADER_SOURCES " << fsGetResourceDirectory(RD_SHADER_SOURCES) << std::endl;
-    char* pwd = getcwd(NULL, 512);
-    std::cout << "Current pwd " << pwd << std::endl;
-    delete pwd;
     Log::Init("FFmpegHAPPLayer");
+
+#ifdef WIN32
+    HINSTANCE instance = (HINSTANCE)GetModuleHandle(NULL);
+    memset(&gWindowClass, 0, sizeof(gWindowClass));
+    gWindowClass.style = 0;
+    gWindowClass.lpfnWndProc = DefWindowProcW;
+    gWindowClass.hInstance = instance;
+    gWindowClass.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    gWindowClass.hCursor = LoadCursor(NULL, IDC_ARROW);
+    gWindowClass.lpszClassName = L"The Forge";
+
+    bool success = RegisterClassW(&gWindowClass) != 0;
+
+    if (!success)
+    {
+        //Get the error message, if any.
+        DWORD errorMessageID = ::GetLastError();
+
+        if (errorMessageID != ERROR_CLASS_ALREADY_EXISTS)
+        {
+            LPSTR messageBuffer = NULL;
+            size_t size = FormatMessageA(
+                FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, errorMessageID,
+                MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPSTR)&messageBuffer, 0, NULL);
+            eastl::string message(messageBuffer, size);
+            LOGF(eERROR, message.c_str());
+            return 5;
+        }
+    }
+#endif
 
     RendererDesc settings = { 0 };
     ::initRenderer("FFmpegHAPPlayer", &settings, &(m_pImpl->renderer));
@@ -205,6 +256,38 @@ int HAPAvFormatForgeRenderer::openWindow(const char *title, int width, int heigh
     (void)title;(void)height;(void)width;
     m_winWidth = width;
     m_winHeight = height;
+#ifdef WIN32
+    DWORD windowStyle = WS_OVERLAPPEDWINDOW;
+    windowStyle ^= WS_THICKFRAME | WS_MAXIMIZEBOX;
+
+    WCHAR app[FS_MAX_PATH] = {};
+    size_t charConverted = 0;
+    mbstowcs_s(&charConverted, app, title, FS_MAX_PATH);
+
+    //
+    int windowY = CW_USEDEFAULT;
+    //because on dual monitor setup this results to always 0 which might not be the case in reality
+    int windowX = CW_USEDEFAULT;
+
+    HWND hwnd = CreateWindowW(
+        L"The Forge",
+        app,
+        windowStyle | WS_VISIBLE | WS_BORDER,
+        windowX, windowY,
+        width, height,
+        NULL, NULL, (HINSTANCE)GetModuleHandle(NULL), 0);
+
+    if (hwnd)
+    {
+        m_winHandle = hwnd;
+        LOGF(LogLevel::eINFO, "Created window app %s", title);
+    }
+    else
+    {
+        LOGF(LogLevel::eERROR, "Failed to create window app %s", title);
+        return 6;
+    }
+#endif
 #ifdef __APPLE__
 
     id <MTLDevice> mtlDevice = MTLCreateSystemDefaultDevice();
@@ -453,9 +536,10 @@ void HAPAvFormatForgeRenderer::readCodecParams(AVCodecParameters *codecParams)
         m_outputBufferSize[textureId] = bytesPerRow * m_codedHeight; //required?
 
         TextureDesc texDesc = {};
+        texDesc.mStartState = RESOURCE_STATE_COMMON;
         texDesc.pName = textureId == 0 ? "video" : "video_alpha";
-        texDesc.mWidth = m_textureWidth;
-        texDesc.mHeight = m_textureHeight;
+        texDesc.mWidth = m_codedWidth;
+        texDesc.mHeight = m_codedHeight;
         texDesc.mDepth = 1;
         texDesc.mArraySize = 1;
         texDesc.mSampleCount = SAMPLE_COUNT_1;
@@ -463,7 +547,7 @@ void HAPAvFormatForgeRenderer::readCodecParams(AVCodecParameters *codecParams)
         texDesc.mClearValue = { 0 };
         texDesc.pNativeHandle = nullptr;
         texDesc.mMipLevels = 1;
-        texDesc.mDescriptors |= DESCRIPTOR_TYPE_RW_TEXTURE;
+        texDesc.mDescriptors |= DESCRIPTOR_TYPE_TEXTURE;
 
         TextureLoadDesc textureDesc = {};
         textureDesc.pDesc = &texDesc;
@@ -520,10 +604,12 @@ void HAPAvFormatForgeRenderer::renderFrame(AVPacket* packet, double msTime) {
         unsigned long outputBufferDecodedSize;
         unsigned int outputBufferTextureFormat;
         //We might be able to directly decode inside of the texture buffer
+        double preUpdate = currentMS();
+        SyncToken token = {};
         TextureUpdateDesc textureUpdateDesc = { m_pImpl->videoTexture[textureId] };
         beginUpdateResource(&textureUpdateDesc);
-        void* outputBuffer = (void*)textureUpdateDesc.pMappedData;
         size_t outputBufferSize = textureUpdateDesc.mRowCount * textureUpdateDesc.mSrcRowStride;
+        uint8_t* outputBuffer = (uint8_t*)malloc(outputBufferSize);
         unsigned int res = HapDecode(packet->data, packet->size,
                                      textureId,
                                      HapMTDecode,
@@ -531,7 +617,18 @@ void HAPAvFormatForgeRenderer::renderFrame(AVPacket* packet, double msTime) {
                                      outputBuffer, outputBufferSize,
                                      &outputBufferDecodedSize,
                                      &outputBufferTextureFormat);
-        endUpdateResource(&textureUpdateDesc, NULL);
+        for (uint32_t r = 0; r < textureUpdateDesc.mRowCount; ++r)
+        {
+            memcpy(textureUpdateDesc.pMappedData + r * textureUpdateDesc.mDstRowStride,
+                   outputBuffer + r * textureUpdateDesc.mSrcRowStride,
+                   textureUpdateDesc.mSrcRowStride);
+        }
+        free(outputBuffer);
+        endUpdateResource(&textureUpdateDesc, &token);
+        waitForToken(&token);
+        double postUpdate = currentMS();
+        std::cout << "full update " << postUpdate - preUpdate << "MS\n";
+
         #ifdef LOG_RUNTIME_INFO
             m_infoLogger.onHapDataDecoded(outputBufferDecodedSize);
         #endif
@@ -569,13 +666,13 @@ void HAPAvFormatForgeRenderer::renderFrame(AVPacket* packet, double msTime) {
         { m_pImpl->depthBuffer, RESOURCE_STATE_DEPTH_WRITE },
     };
 
-    TextureBarrier textureBarriers[m_textureCount];
+    TextureBarrier textureBarriers[2] = {};
     for (uint32_t i = 0; i < m_textureCount; i++)
     {
         textureBarriers[i] = { m_pImpl->videoTexture[i], RESOURCE_STATE_SHADER_RESOURCE };
     }
 
-    cmdResourceBarrier(cmd, 0, nullptr, m_textureCount, textureBarriers, 2, barriers);
+    cmdResourceBarrier(cmd, 0, nullptr, 0, textureBarriers, 2, barriers);
 
 
     LoadActionsDesc loadActions = {};
@@ -596,7 +693,12 @@ void HAPAvFormatForgeRenderer::renderFrame(AVPacket* packet, double msTime) {
 
     //Reset render target state
     barriers[0] = { pRenderTarget, RESOURCE_STATE_PRESENT };
-    cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 1, barriers);
+    for (int i = 0; i < m_textureCount; i++)
+    {
+        textureBarriers[i] = { m_pImpl->videoTexture[i], RESOURCE_STATE_COMMON };
+    }
+
+    cmdResourceBarrier(cmd, 0, NULL, 0, textureBarriers, 1, barriers);
 
     endCmd(cmd);
 

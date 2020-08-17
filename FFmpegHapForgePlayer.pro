@@ -1,6 +1,6 @@
 # Setup
 TEMPLATE = app
-CONFIG += c++14
+CONFIG += c++14 console
 CONFIG -= app_bundle
 CONFIG -= qt
 
@@ -121,12 +121,14 @@ windows {
     LIBS += -L$$THE_FORGE_ROOT/Common_3/ThirdParty/OpenSource/ags/ags_lib/lib/ -lamd_ags_x64
     LIBS += -L$$THE_FORGE_ROOT/Common_3/ThirdParty/OpenSource/nvapi/amd64 -lnvapi64
     LIBS += -L$$THE_FORGE_ROOT/Common_3/ThirdParty/OpenSource/DirectXShaderCompiler/lib/x64 -ldxcompiler
-    LIBS += -lXinput -lgdi32 -lComdlg32 -lOle32 -lUser32
+    LIBS += -lXinput -lgdi32 -lComdlg32 -lOle32 -lUser32 -lshell32
 
     copyToDestDir($$PWD/The-Forge/Common_3/ThirdParty/OpenSource/winpixeventruntime/bin/WinPixEventRuntime.dll \
                   $$PWD/The-Forge/Common_3/ThirdParty/OpenSource/ags/ags_lib/lib/amd_ags_x64.dll \
                   $$PWD/The-Forge/Common_3/ThirdParty/OpenSource/DirectXShaderCompiler/bin/x64/dxcompiler.dll \
                   $$PWD/The-Forge/Common_3/ThirdParty/OpenSource/DirectXShaderCompiler/bin/x64/dxil.dll, $$OUT_PWD)
+
+    DEFINES += DIRECT3D12
 
 }
 
@@ -184,10 +186,10 @@ linux {
 # Copy shaders folder next to executable (if the executable is not at project root)
 !equals(_PRO_FILE_PWD_,OUT_PWD) {
     windows {
-        QMAKE_POST_LINK += xcopy /S /I /E \"$$_PRO_FILE_PWD_/shaders\" \"$${OUT_PWD}\\\";
+        QMAKE_POST_LINK += xcopy /S /I /E \"$$_PRO_FILE_PWD_/shaders\" \"$${OUT_PWD}\\\"
     }
     !windows {
-        QMAKE_POST_LINK += cp -R $$_PRO_FILE_PWD_/shaders $${OUT_PWD};
+        QMAKE_POST_LINK += cp -R $$_PRO_FILE_PWD_/shaders $${OUT_PWD}
     }
 }
 

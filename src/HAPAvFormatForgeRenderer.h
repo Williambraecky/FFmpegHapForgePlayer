@@ -1,6 +1,8 @@
 #ifndef HAPAVFORMATFORGERENDERER_H
 #define HAPAVFORMATFORGERENDERER_H
 
+#include <assert.h>
+
 extern "C"
 {
     #include <libavcodec/avcodec.h>
